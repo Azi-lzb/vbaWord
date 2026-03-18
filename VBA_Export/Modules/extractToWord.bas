@@ -1,7 +1,7 @@
 Attribute VB_Name = "extractToWord"
 ' ==========================================================
 ' vbaWord: Word Form Batch Summarizer (Output to Word)
-' Fixed Error 3012 (Protect method failed on protected doc)
+' Fixed Error 3012 & Added Password Support
 ' ==========================================================
 
 Sub SummarizeToNewWordDoc()
@@ -9,7 +9,10 @@ Sub SummarizeToNewWordDoc()
     Dim fd As FileDialog, fileItem As Variant, ff As Object, dict As Object 
     Dim key As Variant, rawFileName As String, displayName As String
     Dim qText As String, i As Integer, prevEnd As Long
-    Dim pType As Long, isUnprotected As Boolean
+    Dim pType As Long, isUnprotected As Boolean, docPwd As String
+    
+    ' --- 1. 获取文档保护密码 (从 mapping 表 E1 单元格读取) ---
+    docPwd = GetConfigPassword()
     
     On Error Resume Next
     Set wdApp = GetObject(, "Word.Application")
@@ -34,29 +37,29 @@ Sub SummarizeToNewWordDoc()
                 rawFileName = Dir(fileItem)
                 displayName = GetMappedName(rawFileName)
                 
-                ' 以非只读模式打开，否则保护操作可能受限
                 Set wdDoc = wdApp.Documents.Open(Filename:=fileItem, ReadOnly:=False, Visible:=False)
                 
-                ' --- 安全解除保护逻辑 ---
+                ' --- 2. 尝试使用密码解除保护 ---
                 pType = wdDoc.ProtectionType
                 isUnprotected = False
                 
-                If pType <> -1 Then ' -1 表示 wdNoProtection
+                If pType <> -1 Then
                     On Error Resume Next
-                    wdDoc.Unprotect Password:="" ' 如果您的文档有密码，请在此处填写
+                    wdDoc.Unprotect Password:=docPwd
                     If Err.Number = 0 Then
                         isUnprotected = True
                     Else
-                        ' 如果解除失败（比如有密码），记录下错误但不中断
-                        Debug.Print "无法解除文档保护 (可能由于密码): " & rawFileName
+                        Debug.Print "警告: 无法解除保护，密码可能错误: " & rawFileName
                     End If
                     On Error GoTo 0
                 End If
                 
-                ' --- 提取数据 ---
+                ' --- 3. 提取数据 ---
                 prevEnd = 0
+                On Error Resume Next ' 防止个别域损坏导致崩溃
                 For i = 1 To wdDoc.FormFields.Count
                     Set ff = wdDoc.FormFields(i)
+                    ' 如果没有解除保护，此处 Range 操作可能会受限
                     qText = wdDoc.Range(prevEnd, ff.Range.Start).Text
                     qText = Replace(qText, vbCr, ""): qText = Replace(qText, vbLf, "")
                     qText = Replace(qText, ":", ""): qText = Replace(qText, "：", "")
@@ -71,11 +74,12 @@ Sub SummarizeToNewWordDoc()
                     End If
                     prevEnd = ff.Range.End
                 Next i
+                On Error GoTo 0
                 
-                ' --- 恢复保护逻辑 (仅当之前成功解除过才恢复) ---
+                ' --- 4. 恢复保护 (仅当成功解除过才恢复) ---
                 If pType <> -1 And isUnprotected Then
                     On Error Resume Next
-                    wdDoc.Protect Type:=pType, NoReset:=True
+                    wdDoc.Protect Type:=pType, NoReset:=True, Password:=docPwd
                     On Error GoTo 0
                 End If
                 
@@ -93,8 +97,20 @@ Sub SummarizeToNewWordDoc()
             MsgBox "汇总完成！", vbInformation
         End If
     End With
-    Set targetDoc = Nothing: Set wdDoc = Nothing: Set wdApp = Nothing
 End Sub
+
+' 获取配置密码函数
+Private Function GetConfigPassword() As String
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("mapping")
+    If Not ws Is Nothing Then
+        GetConfigPassword = Trim(CStr(ws.Range("E1").Value))
+    Else
+        GetConfigPassword = ""
+    End If
+    On Error GoTo 0
+End Function
 
 ' 映射函数
 Private Function GetMappedName(originalName As String) As String
