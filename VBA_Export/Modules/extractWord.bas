@@ -1,38 +1,32 @@
 Attribute VB_Name = "extractWord"
 ' ==========================================================
 ' vbaWord: Word Form to Excel Summarizer
-' Author: Azi-lzb
-' Description: Extracts data from legacy form fields into "output" sheet.
+' Updated: Use modConfig for settings
 ' ==========================================================
 
 Sub BatchSummarizeWordForms()
-    Dim wdApp As Object
-    Dim wdDoc As Object
-    Dim fd As FileDialog
-    Dim fileItem As Variant
-    Dim iRow As Long, iCol As Integer
-    Dim ff As Object
-    Dim ws As Worksheet
-    Dim rawFileName As String
-    Dim displayName As String
+    Dim wdApp As Object, wdDoc As Object, fd As FileDialog
+    Dim fileItem As Variant, iRow As Long, iCol As Integer
+    Dim ff As Object, ws As Worksheet, rawFileName As String
+    Dim displayName As String, docPwd As String
+    Dim pType As Long, isUnprotected As Boolean
     
-    ' --- 查找或创建 output 工作表 ---
+    ' 从新配置模块读取
+    docPwd = modConfig.GetDocPassword()
+    
     On Error Resume Next
     Set ws = ThisWorkbook.Sheets("output")
     On Error GoTo 0
-    
     If ws Is Nothing Then
-        ' 如果工作表不存在则新建一个
         Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
         ws.Name = "output"
     Else
-        ' 如果工作表已存在则清空内容
         ws.Cells.Clear
     End If
     
-    ' 初始化 Word
     On Error Resume Next
-    Set wdApp = CreateObject("Word.Application")
+    Set wdApp = GetObject(, "Word.Application")
+    If wdApp Is Nothing Then Set wdApp = CreateObject("Word.Application")
     On Error GoTo 0
     
     If wdApp Is Nothing Then
@@ -40,23 +34,27 @@ Sub BatchSummarizeWordForms()
         Exit Sub
     End If
     
-    ' 选择文件
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
     With fd
-        .Title = "请选择要汇总的 Word 问卷文档"
+        .Title = "请选择旧式窗体问卷 (汇总至 Excel)"
         .Filters.Add "Word Documents", "*.doc; *.docx; *.docm", 1
-        .AllowMultiSelect = True
         
         If .Show = -1 Then
             iRow = 2
-            
             For Each fileItem In .SelectedItems
                 rawFileName = Dir(fileItem)
                 displayName = GetMappedName(rawFileName)
                 
-                Set wdDoc = wdApp.Documents.Open(fileName:=fileItem, ReadOnly:=True, Visible:=False)
+                Set wdDoc = wdApp.Documents.Open(Filename:=fileItem, ReadOnly:=False, Visible:=False)
                 
-                ' 设置表头
+                pType = wdDoc.ProtectionType: isUnprotected = False
+                If pType <> -1 Then
+                    On Error Resume Next
+                    wdDoc.Unprotect Password:=docPwd
+                    If Err.Number = 0 Then isUnprotected = True
+                    On Error GoTo 0
+                End If
+                
                 If iRow = 2 Then
                     ws.Cells(1, 1).Value = "源文件名 (映射后)"
                     iCol = 2
@@ -67,50 +65,37 @@ Sub BatchSummarizeWordForms()
                     ws.Range("A1:Z1").Font.Bold = True
                 End If
                 
-                ' 填入数据
                 ws.Cells(iRow, 1).Value = displayName
                 iCol = 2
                 For Each ff In wdDoc.FormFields
-                    ws.Cells(iRow, iCol).Value = ff.result
+                    ws.Cells(iRow, iCol).Value = ff.Result
                     iCol = iCol + 1
                 Next ff
+                
+                If pType <> -1 And isUnprotected Then
+                    On Error Resume Next
+                    wdDoc.Protect Type:=pType, NoReset:=True, Password:=docPwd
+                    On Error GoTo 0
+                End If
                 
                 wdDoc.Close SaveChanges:=False
                 iRow = iRow + 1
             Next fileItem
             
             ws.Columns.AutoFit
-            ws.Activate ' 汇总完成后自动跳转到 output 表
-            MsgBox "汇总完成！结果已保存至 'output' 工作表。", vbInformation
+            MsgBox "汇总完成！", vbInformation
         End If
     End With
-    
-    wdApp.Quit
-    Set wdDoc = Nothing
-    Set wdApp = Nothing
 End Sub
 
-' 映射逻辑函数
 Private Function GetMappedName(originalName As String) As String
-    Dim mapWs As Worksheet
-    Dim lastRow As Long
-    Dim i As Long
-    Dim result As String
-    
-    result = originalName
-    On Error Resume Next
-    Set mapWs = ThisWorkbook.Sheets("mapping")
-    On Error GoTo 0
-    
+    Dim mapWs As Worksheet: Dim i As Long: GetMappedName = originalName
+    On Error Resume Next: Set mapWs = ThisWorkbook.Sheets("mapping"): On Error GoTo 0
     If Not mapWs Is Nothing Then
-        lastRow = mapWs.Cells(mapWs.Rows.Count, "A").End(xlUp).Row
-        For i = 2 To lastRow
+        For i = 2 To mapWs.Cells(mapWs.Rows.Count, "A").End(xlUp).Row
             If InStr(1, originalName, mapWs.Cells(i, 1).Value, vbTextCompare) > 0 Then
-                result = mapWs.Cells(i, 2).Value
-                Exit For
+                GetMappedName = mapWs.Cells(i, 2).Value: Exit Function
             End If
         Next i
     End If
-    
-    GetMappedName = result
 End Function

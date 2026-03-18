@@ -1,14 +1,23 @@
-# Gemini CLI Agent Rules for vbaWord
+# vbaWord 项目：Gemini CLI 代理规则
 
-## 1. VBA Source File Modification (Critical)
-- **Method**: When modifying or updating `.bas`, `.cls`, or `.frm` files, **NEVER** use partial replacement (`replace` tool). Always rewrite the entire file.
-- **Workflow**: To prevent encoding issues (mojibake) in the VBA editor:
-    1. Generate the complete source code.
-    2. Write the content into a temporary `.txt` file first.
-    3. Overwrite the target VBA file with the content of the `.txt` file (or move/rename the file).
-    4. Delete the temporary file.
-- **Encoding**: Ensure the final file is compatible with the Windows system's ANSI/GBK encoding for Chinese characters.
+## 1. VBA 源码文件修改与编码控制 (核心规则)
+- **重写机制**：在修改或更新 `.bas`、`.cls` 或 `.frm` 文件时，**必须**使用 `write_file` 重新写入完整的源代码，严禁使用局部替换。
+- **强制 GBK 转换流程**：为了确保在 Windows 中文环境下的 VBA 编辑器中不出现乱码（mojibake），必须执行以下“桥接转换”：
+    1. 首先使用 `write_file` 将内容写入一个临时文件（如 `.bas.tmp`）。
+    2. 使用 PowerShell 命令执行精确的编码转换：
+       `[System.IO.File]::WriteAllText($path, $content, [System.Text.Encoding]::GetEncoding(936))`
+    3. 将文件转换为 **ANSI (GBK/936)** 编码后，覆盖正式的源码文件并删除临时文件。
+- **验证标准**：用户直接通过 VBA 编辑器“导入文件”功能导入时，中文注释和提示信息必须显示正常。
 
-## 2. Environment Compatibility
-- **Late Binding**: Use `Object` instead of specific Word/Excel types (e.g., `Dim doc As Object` instead of `Dim doc As Word.Document`) to ensure the code runs correctly across different Office versions and environments (Excel-to-Word automation).
-- **Protection Handling**: Always check `ProtectionType` before modifying documents. Perform edits in an unprotected state, and apply `Protect` (if needed) only as the final step before saving.
+## 2. 环境兼容性与逻辑安全
+- **后期绑定 (Late Binding)**：使用 `Object` 类型以确保跨 Office 版本兼容。
+- **配置项读取 (mapping 表)**：
+    - **E1 单元格**：存储文档保护密码。
+    - **F1 单元格**：存储优先级模式（"TAG" 或 "TITLE"）。默认为 "TAG"。
+- **解保护逻辑**：只有在 `Unprotect` 成功执行且未报错的情况下，才在最后尝试恢复保护（`Protect`），以此彻底规避 **3012 错误**。
+
+## 3. Git 操作限制
+- **默认政策**：除非用户发出明确的指令，否则**严禁**执行任何 Git 操作（`git add`、`git commit` 或 `git push`）。
+
+## 4. 测试数据生成规范
+- **操作顺序**：生成测试文档时，遵循 **插入内容 -> 保存 -> 开启保护 -> 再次保存并关闭** 的逻辑。
