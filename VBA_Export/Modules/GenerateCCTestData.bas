@@ -2,21 +2,17 @@ Attribute VB_Name = "GenerateCCTestData"
 ' ==========================================================
 ' Content Control Test Data Generator
 ' Author: Azi-lzb
-' Logic: Create -> Unprotect -> Fill Content -> Protect -> Save
+' Optimized: Save before Protect; Selection Clean-up
 ' ==========================================================
 
 Sub CreateCCSampleDocs()
     Dim i As Integer
-    Dim doc As Object ' Word.Document
+    Dim doc As Object, cc As Object, rng As Object, wdApp As Object
     Dim folderPath As String
-    Dim cc As Object ' Word.ContentControl
-    Dim rng As Object ' Word.Range
-    Dim wdApp As Object
     
-    ' 设置输出目录路径
-    folderPath = "C:\Users\AZI\Desktop\VibeCode项目\vbaWord\"
+    ' 1. 将路径设置为当前 Excel 文件所在的目录
+    folderPath = ThisWorkbook.Path & "\"
     
-    ' 1. 初始化 Word 实例
     On Error Resume Next
     Set wdApp = GetObject(, "Word.Application")
     If wdApp Is Nothing Then
@@ -24,84 +20,60 @@ Sub CreateCCSampleDocs()
     End If
     On Error GoTo 0
     
-    ' 2. 检查目录有效性
-    If Dir(folderPath, vbDirectory) = "" Then
-        On Error Resume Next
-        folderPath = ThisWorkbook.Path & "\"
-        On Error GoTo 0
+    If wdApp Is Nothing Then
+        MsgBox "无法启动 Word。", vbCritical
+        Exit Sub
     End If
+    
+    wdApp.Visible = True
 
-    ' 3. 循环生成文档
+    ' 2. 循环生成
     For i = 1 To 3
         Set doc = wdApp.Documents.Add
 
-        ' --- 确保文档未受保护以进行编辑 ---
-        On Error Resume Next
-        If doc.ProtectionType <> -1 Then ' -1 = wdNoProtection
-            doc.Unprotect Password:=""
-        End If
-        On Error GoTo 0
-
-        ' A. 插入姓名 (文本控件)
+        ' A. 插入内容 (内容控件)
         Set rng = doc.Content
-        rng.Collapse 0 ' wdCollapseEnd
+        rng.Collapse 0
         rng.InsertAfter "姓名: "
         rng.Collapse 0
-        Set cc = doc.ContentControls.Add(1, rng) ' 1 = wdContentControlText
+        Set cc = doc.ContentControls.Add(1, rng) ' wdContentControlText
         cc.Title = "姓名"
         cc.Tag = "UserName"
-        cc.Range.Text = "员工_" & i
+        cc.Range.Text = "新式员工_" & i
 
-        ' B. 插入日期 (日期控件)
         Set rng = doc.Content
         rng.Collapse 0
-        rng.InsertAfter vbCrLf & "填写日期: "
+        rng.InsertAfter vbCrLf & "部门: "
         rng.Collapse 0
-        Set cc = doc.ContentControls.Add(4, rng) ' 4 = wdContentControlDate
-        cc.Title = "日期"
-        cc.Tag = "FillDate"
-        cc.Range.Text = CStr(DateAdd("d", i, Date))
-
-        ' C. 插入部门 (下拉列表)
-        Set rng = doc.Content
-        rng.Collapse 0
-        rng.InsertAfter vbCrLf & "所属部门: "
-        rng.Collapse 0
-        Set cc = doc.ContentControls.Add(3, rng) ' 3 = wdContentControlDropdownList
+        Set cc = doc.ContentControls.Add(3, rng) ' wdContentControlDropdownList
         cc.Title = "部门"
-        cc.Tag = "Dept"
         cc.DropdownListEntries.Add "财务部", "Fin"
         cc.DropdownListEntries.Add "技术部", "Tech"
-        cc.DropdownListEntries.Add "市场部", "Mkt"
         cc.Range.Text = "技术部"
 
-        ' D. 底部提示
-        Set rng = doc.Content
-        rng.Collapse 0
-        rng.InsertAfter vbCrLf & vbCrLf & "---------------------------------------" & vbCrLf
-        rng.InsertAfter "提示：该问卷文档已被设置为【仅限填写窗体】模式。"
-
-        ' --- 重新应用保护，防止直接编辑非控件区域 ---
-        ' 3 = wdAllowOnlyFormFields (旧式窗体保护也适用于内容控件填写)
+        ' B. 先保存一次 (解决 6124 错误的关键)
         On Error Resume Next
+        doc.SaveAs2 Filename:=folderPath & "CC_Sample_" & i & ".docx"
+        On Error GoTo 0
+        
+        ' C. 统一限制编辑 (仅限填写窗体)
+        ' 给 Word 一个极短的缓冲时间
+        DoEvents
+        
+        ' 尝试清除文档中的光标位置以确保保护不会因 Selection 锁定而失败
+        wdApp.Selection.WholeStory
+        wdApp.Selection.Collapse 1 ' wdCollapseStart
+
+        On Error Resume Next
+        ' 3 = wdAllowOnlyFormFields
         doc.Protect Type:=3, NoReset:=True, Password:=""
+        If Err.Number <> 0 Then Debug.Print "Error protecting CC doc: " & Err.Description
         On Error GoTo 0
 
-        ' 4. 保存文档
-        On Error Resume Next
-        doc.SaveAs2 fileName:=folderPath & "CC_Sample_" & i & ".docx"
-        If Err.Number <> 0 Then
-            MsgBox "保存失败，请检查路径权限：" & vbCrLf & folderPath, vbExclamation
-            doc.Close False
-            Exit Sub
-        End If
-        On Error GoTo 0
-
+        ' D. 再次保存并关闭
+        doc.Save
         doc.Close
     Next i
 
-    wdApp.Visible = True
-    MsgBox "内容控件测试数据生成完成！" & vbCrLf & _
-           "逻辑：生成 -> 解除保护 -> 填充 -> 重新保护。" & vbCrLf & _
-           "路径：" & folderPath, vbInformation
+    MsgBox "已在 Excel 目录下生成 3 份内容控件 (新式窗体) 测试文件。", vbInformation
 End Sub

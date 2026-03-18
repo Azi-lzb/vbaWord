@@ -1,7 +1,7 @@
 Attribute VB_Name = "GenerateTestData"
 ' ==========================================================
 ' Test Data Generator for vbaWord (Legacy Form Fields)
-' Logic: Create Word App -> Add Doc -> Insert Fields -> Protect -> Save
+' Optimized Flow: Create -> Save -> Protect -> Final Save
 ' ==========================================================
 
 Sub CreateSampleDocs()
@@ -10,10 +10,9 @@ Sub CreateSampleDocs()
     Dim wdApp As Object
     Dim folderPath As String
     
-    ' 设置项目根目录路径
-    folderPath = "C:\Users\AZI\Desktop\VibeCode项目\vbaWord\"
+    ' 1. 将路径设置为当前 Excel 文件所在的目录
+    folderPath = ThisWorkbook.Path & "\"
     
-    ' 1. 初始化 Word 应用程序实例 (解决 Error 424 关键)
     On Error Resume Next
     Set wdApp = GetObject(, "Word.Application")
     If wdApp Is Nothing Then
@@ -22,49 +21,42 @@ Sub CreateSampleDocs()
     On Error GoTo 0
     
     If wdApp Is Nothing Then
-        MsgBox "无法启动 Word，请确保已安装 Word。", vbCritical
+        MsgBox "无法启动 Word。", vbCritical
         Exit Sub
     End If
     
     wdApp.Visible = True
     
-    ' 2. 创建 3 份示例问卷
+    ' 2. 循环生成
     For i = 1 To 3
-        ' 使用 wdApp.Documents 而不是直接用 Documents
         Set doc = wdApp.Documents.Add
         
-        ' 插入问卷内容
+        ' --- 步骤 A: 插入内容 ---
         doc.Range.InsertAfter "姓名: "
-        ' 插入窗体域 (文本输入) - 使用常量 70 (wdFieldFormTextInput)
         doc.FormFields.Add Range:=doc.Range(doc.Range.End - 1, doc.Range.End - 1), Type:=70
         doc.FormFields(doc.FormFields.Count).Name = "UserName"
         doc.FormFields(doc.FormFields.Count).Result = "用户_" & i
         
-        doc.Range.InsertAfter vbCrLf & "年龄: "
+        doc.Range.InsertAfter vbCrLf & "反馈: "
         doc.FormFields.Add Range:=doc.Range(doc.Range.End - 1, doc.Range.End - 1), Type:=70
-        doc.FormFields(doc.FormFields.Count).Name = "UserAge"
-        doc.FormFields(doc.FormFields.Count).Result = 20 + i
+        doc.FormFields(doc.FormFields.Count).Result = "测试反馈 " & i
         
-        doc.Range.InsertAfter vbCrLf & "反馈意见: "
-        doc.FormFields.Add Range:=doc.Range(doc.Range.End - 1, doc.Range.End - 1), Type:=70
-        doc.FormFields(doc.FormFields.Count).Name = "Comments"
-        doc.FormFields(doc.FormFields.Count).Result = "来自用户 " & i & " 的测试反馈内容。"
-        
-        ' 保护文档 (仅限填写窗体) - 3 = wdAllowOnlyFormFields
-        doc.Protect Type:=3, NoReset:=True, Password:=""
-        
-        ' 保存文件
+        ' --- 步骤 B: 先保存一次 (解决 6124 错误的关键) ---
         On Error Resume Next
         doc.SaveAs2 Filename:=folderPath & "Sample_Data_" & i & ".docx"
-        If Err.Number <> 0 Then
-            MsgBox "保存失败，请检查路径权限：" & vbCrLf & folderPath, vbExclamation
-            doc.Close False
-            Exit Sub
-        End If
         On Error GoTo 0
         
+        ' --- 步骤 C: 统一限制编辑 ---
+        ' 3 = wdAllowOnlyFormFields
+        On Error Resume Next
+        doc.Protect Type:=3, NoReset:=True, Password:=""
+        If Err.Number <> 0 Then Debug.Print "Protection Error: " & Err.Description
+        On Error GoTo 0
+        
+        ' --- 步骤 D: 再次保存并关闭 ---
+        doc.Save
         doc.Close
     Next i
     
-    MsgBox "已在以下路径生成 3 份测试文件：" & vbCrLf & folderPath, vbInformation
+    MsgBox "已在 Excel 目录下生成 3 份旧式窗体测试文件。", vbInformation
 End Sub
